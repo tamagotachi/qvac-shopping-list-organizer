@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shopping List Organizer</title>
+<style>
+  :root { --bg: #f3faf4; --ink: #183020; --muted: #5c7564; --line: #d3e7d8; --card: #fff; --green: #2f9e44; --red: #e03131; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 26px 16px 56px; }
+  h1 { font-size: 32px; line-height: 1.1; margin: 0; } h1 span { color: var(--green); } .sub { color: var(--muted); margin: 4px 0 8px; }
+  #status { font-size: 13px; color: var(--muted); margin: 0 0 12px; } #status.ok { color: var(--green); } #status.err { color: var(--red); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
+  textarea, input, select { font: inherit; padding: 9px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); min-width: 0; } textarea { width: 100%; min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 15px; }
+  textarea:focus-visible, input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid #8ce99a; outline-offset: 2px; }
+  button { font: inherit; font-weight: 700; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--green); color: #fff; cursor: pointer; }
+  button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); padding: 6px 12px; font-size: 14px; } button.busy { opacity: .55; cursor: progress; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; } .row > input { flex: 1 1 200px; } .note { color: var(--muted); font-size: 14px; min-height: 20px; margin: 8px 0 0; }
+  .prog { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; } .bar { flex: 1; height: 12px; background: var(--line); border-radius: 99px; overflow: hidden; } .bar div { height: 100%; width: 0; background: var(--green); transition: width .3s; }
+  .aisles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .aisle { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; } .aisle h3 { margin: 0 0 6px; font-size: 16px; display: flex; justify-content: space-between; } .aisle h3 span { color: var(--muted); font-weight: 400; font-size: 13px; }
+  .it { display: flex; gap: 8px; align-items: center; padding: 3px 0; } .it label { flex: 1; display: flex; gap: 8px; align-items: center; cursor: pointer; } .it input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--green); }
+  .it.got span { text-decoration: line-through; color: var(--muted); } .it select { font-size: 12px; padding: 2px 4px; border-width: 1px; max-width: 110px; }
+  #src { color: var(--muted); font-size: 13px; } .hidden { display: none; }
+  @media print { body { background: #fff; } .panel, #status, .row, .it select, h1 + .sub { display: none !important; } .aisle { break-inside: avoid; } }
+  @media (prefers-reduced-motion: reduce) { .bar div { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Shopping List <span>Organizer</span></h1>
+  <p class="sub">Paste a messy list. Get it sorted by store aisle, so you walk the store once.</p>
+  <p id="status">Checking the AI list sorter...</p>
+  <section class="panel">
+    <textarea id="input" placeholder="One item per line, or separated by commas:&#10;milk, 2 bananas, bread, dish soap, frozen peas..." aria-label="Your shopping list"></textarea>
+    <div class="row"><button id="go">Sort by aisle</button><button class="ghost" id="sample">Try a sample</button><button class="ghost" id="clearIn">Clear</button></div>
+    <p class="note" id="note"></p>
+  </section>
+
+  <section id="listBox" class="hidden">
+    <div class="prog"><strong id="progText"></strong><div class="bar"><div id="barFill"></div></div></div>
+    <p id="src"></p>
+    <div class="aisles" id="aisles"></div>
+    <div class="panel" style="margin-top:14px"><div class="row" style="margin-top:0"><input id="add" placeholder="Forgot something? Add it here" maxlength="80" autocomplete="off" aria-label="Add an item"><button id="addBtn">Add</button></div>
+      <div class="row"><button class="ghost" id="copy">Copy list</button><button class="ghost" id="print">Print</button><button class="ghost" id="clearGot">Remove ticked items</button><button class="ghost" id="clearAll">Clear list</button></div></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const AISLES = ["Produce", "Bakery", "Meat & fish", "Dairy & eggs", "Frozen", "Pantry", "Snacks & sweets", "Drinks", "Household", "Personal care", "Baby & pets", "Other"];
+const ICON = { "Produce": "\ud83e\udd66", "Bakery": "\ud83c\udf5e", "Meat & fish": "\ud83e\udd69", "Dairy & eggs": "\ud83e\udd5b", "Frozen": "\u2744\ufe0f", "Pantry": "\ud83e\udd6b", "Snacks & sweets": "\ud83c\udf6a", "Drinks": "\ud83e\uddc3", "Household": "\ud83e\uddfd", "Personal care": "\ud83e\uddf4", "Baby & pets": "\ud83d\udc3e", "Other": "\ud83d\uded2" };
+// Keyword guesses, used while the AI loads and for items you add later
+const GUESS = [["Produce", "apple banana orange lemon lime grape berr strawberr tomato potato onion garlic carrot lettuce salad spinach cucumber pepper broccoli avocado mushroom fruit veg herb celery zucchini corn melon mango pear peach"],
+  ["Bakery", "bread bagel bun roll croissant muffin cake tortilla pita baguette"], ["Meat & fish", "chicken beef pork mince steak bacon ham sausage turkey fish salmon tuna shrimp prawn lamb"],
+  ["Dairy & eggs", "milk cheese yogurt yoghurt butter cream egg"], ["Frozen", "frozen ice cream pizza fries peas"], ["Pantry", "rice pasta noodle flour sugar salt oil vinegar sauce ketchup mayo cereal oat bean lentil soup can tin spice honey jam peanut coffee tea"],
+  ["Snacks & sweets", "chip crisp cookie biscuit chocolate candy sweet snack popcorn cracker nut"], ["Drinks", "water juice soda cola lemonade drink"],
+  ["Household", "soap detergent dish sponge towel paper toilet foil trash bag bin clean bleach batter bulb"], ["Personal care", "shampoo conditioner toothpaste toothbrush deodorant lotion razor tissue plaster bandage sunscreen"],
+  ["Baby & pets", "diaper nappy wipe baby formula dog cat pet litter"]];
+const guess = (item) => { const t = item.toLowerCase(); if (/\bfrozen\b|ice cream/.test(t)) return "Frozen"; if (/juice|soda|cola|lemonade|sparkling|bottled water/.test(t)) return "Drinks"; if (/cat food|dog food|pet food|litter/.test(t)) return "Baby & pets"; const hit = GUESS.find(([, words]) => words.split(" ").some((w) => t.includes(w))); return hit ? hit[0] : "Other"; };
+let list = null, busy = false, ai = { ready: false, message: "Loading...", percent: null, error: null };
+try { list = JSON.parse(localStorage.getItem("shopList") || "null"); } catch {}
+const persist = () => { try { localStorage.setItem("shopList", JSON.stringify(list)); } catch {} };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const parse = () => $("input").value.split(/\n|,/).map((s) => s.trim().replace(/^[-*\u2022\s]+/, "")).filter(Boolean).slice(0, 80);
+$("sample").addEventListener("click", () => { $("input").value = "milk\n2 bananas\nwholemeal bread\ndish soap\nfrozen peas\nchicken thighs\nshampoo\nrice\ntomatos\ncookies\norange juice\ncat food\neggs\nspinach"; });
+$("clearIn").addEventListener("click", () => { $("input").value = ""; $("input").focus(); });
+
+function draw() {
+  if (!list) { $("listBox").classList.add("hidden"); return; }
+  $("listBox").classList.remove("hidden"); $("src").textContent = list.src; const box = $("aisles"); box.innerHTML = "";
+  AISLES.forEach((a) => { const items = list.items.filter((i) => i.aisle === a); if (!items.length) return;
+    const card = document.createElement("div"); card.className = "aisle"; const h = document.createElement("h3"); h.textContent = ICON[a] + " " + a; const c = document.createElement("span"); c.textContent = items.filter((i) => i.got).length + "/" + items.length; h.append(c); card.append(h);
+    items.forEach((it) => { const r = document.createElement("div"); r.className = "it" + (it.got ? " got" : ""); const l = document.createElement("label"); const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = it.got;
+      cb.addEventListener("change", () => { it.got = cb.checked; persist(); draw(); }); const s = document.createElement("span"); s.textContent = it.item; l.append(cb, s);
+      const sel = document.createElement("select"); sel.setAttribute("aria-label", "Move " + it.item + " to another aisle"); AISLES.forEach((x) => { const o = document.createElement("option"); o.value = x; o.textContent = x; if (x === a) o.selected = true; sel.append(o); });
+      sel.addEventListener("change", () => { it.aisle = sel.value; persist(); draw(); }); r.append(l, sel); card.append(r); });
+    box.append(card); });
+  const got = list.items.filter((i) => i.got).length; $("progText").textContent = got === list.items.length && got ? "\ud83c\udf89 All done! " + got + " items" : got + " of " + list.items.length + " in the cart"; $("barFill").style.width = (list.items.length ? (got / list.items.length) * 100 : 0) + "%";
+}
+async function sortIt() {
+  if (busy) return; const items = parse(); if (!items.length) { $("note").textContent = "Type or paste your shopping list first."; return $("input").focus(); }
+  if (!ai.ready) { list = { src: "Sorted by keywords (AI loading). Move anything that's in the wrong aisle.", items: items.map((i) => ({ id: uid(), item: i, aisle: guess(i), got: false })) }; persist(); draw(); $("note").textContent = (ai.error ? "The AI isn't available" : "The AI is still loading" + (ai.percent != null ? " (" + ai.percent + "%)" : "")) + ", so this used keywords."; return; }
+  busy = true; $("go").classList.add("busy"); $("note").textContent = "Sorting " + items.length + " items...";
+  try { const res = await fetch("/api/sort", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) }); const r = await res.json(); if (!res.ok) throw new Error(r.error);
+    list = { src: "Sorted by the on-device AI. Use the menus to move anything.", items: r.map((x) => ({ id: uid(), item: x.item, aisle: x.aisle, got: false })) }; persist(); draw(); $("note").textContent = ""; }
+  catch (err) { list = { src: "Sorted by keywords", items: items.map((i) => ({ id: uid(), item: i, aisle: guess(i), got: false })) }; persist(); draw(); $("note").textContent = "The AI had a problem (" + err.message + "), so this used keywords."; }
+  busy = false; $("go").classList.remove("busy");
+}
+$("go").addEventListener("click", sortIt); $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sortIt(); });
+function addItem() { const t = $("add").value.trim(); if (!t) return $("add").focus(); list.items.push({ id: uid(), item: t, aisle: guess(t), got: false }); persist(); draw(); $("add").value = ""; $("add").focus(); }
+$("addBtn").addEventListener("click", addItem); $("add").addEventListener("keydown", (e) => { if (e.key === "Enter") addItem(); });
+$("copy").addEventListener("click", async () => { const t = AISLES.filter((a) => list.items.some((i) => i.aisle === a)).map((a) => a.toUpperCase() + "\n" + list.items.filter((i) => i.aisle === a).map((i) => (i.got ? "[x] " : "[ ] ") + i.item).join("\n")).join("\n\n"); try { await navigator.clipboard.writeText(t); $("copy").textContent = "Copied!"; } catch { $("copy").textContent = "Press Ctrl+C"; } setTimeout(() => ($("copy").textContent = "Copy list"), 1200); });
+$("print").addEventListener("click", () => window.print());
+$("clearGot").addEventListener("click", () => { list.items = list.items.filter((i) => !i.got); persist(); draw(); });
+$("clearAll").addEventListener("click", () => { if (confirm("Clear the whole list?")) { list = null; persist(); draw(); } });
+
+async function checkStatus() {
+  try { ai = await (await fetch("/api/status")).json();
+    if (ai.error) return setStatus("AI error: " + ai.error + ". Keyword sorting still works.", "err");
+    if (ai.ready) return setStatus("AI list sorter ready. It runs on your device.", "ok");
+    setStatus(ai.message + (ai.percent != null ? " " + ai.percent + "%" : "") + " Keyword sorting works meanwhile.");
+  } catch { ai = { ready: false, error: "the server can't be reached" }; setStatus("Can't reach the server. Open http://localhost:3058 and make sure npm start is running.", "err"); return; }
+  setTimeout(checkStatus, 1500);
+}
+function setStatus(t, c = "") { $("status").textContent = t; $("status").className = c; }
+draw(); checkStatus();
+</script>
+</body>
+</html>
