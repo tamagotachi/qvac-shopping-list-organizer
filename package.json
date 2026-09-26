@@ -1,0 +1,10 @@
+{
+  "name": "qvac-shopping-list-organizer",
+  "version": "1.0.0",
+  "description": "Shopping List Organizer: paste a messy shopping list and an on-device AI sorts it by store aisle, so you walk the store once. Powered by the QVAC SDK.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "@qvac/sdk": "^0.19.0" },
+  "license": "MIT"
+}
